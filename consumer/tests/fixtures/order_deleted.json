@@ -1,0 +1,17 @@
+{
+  "topic": "cdc.outbox.order",
+  "partition": 1,
+  "offset": 6,
+  "key": "1001",
+  "value": {
+    "id": 1001,
+    "deleted": true,
+    "version": 78,
+    "occurred_at": "2026-10-20T09:00:00.000000+00:00"
+  },
+  "headers": {
+    "eventType": "OrderDeleted",
+    "aggregateVersion": "78"
+  },
+  "timestamp_ms": 1792486800100
+}

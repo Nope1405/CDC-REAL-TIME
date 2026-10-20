@@ -1,0 +1,55 @@
+{
+  "name": "debezium-products",
+  "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+  "tasks.max": "1",
+
+  "database.hostname": "postgres",
+  "database.port": "5432",
+  "database.user": "${env:DEBEZIUM_DB_USER}",
+  "database.password": "${env:DEBEZIUM_DB_PASSWORD}",
+  "database.dbname": "${env:POSTGRES_DB}",
+
+  "topic.prefix": "cdc",
+  "plugin.name": "pgoutput",
+  "slot.name": "cdc_products_slot",
+  "publication.name": "cdc_products_pub",
+  "publication.autocreate.mode": "disabled",
+  "table.include.list": "public.products,public.debezium_heartbeat,public.debezium_signal",
+
+  "snapshot.mode": "initial",
+  "snapshot.fetch.size": "10000",
+  "max.batch.size": "4096",
+  "max.queue.size": "16384",
+  "poll.interval.ms": "100",
+
+  "decimal.handling.mode": "string",
+  "time.precision.mode": "adaptive_time_microseconds",
+  "tombstones.on.delete": "true",
+  "unavailable.value.placeholder": "__debezium_unavailable_value",
+
+  "heartbeat.interval.ms": "10000",
+  "heartbeat.action.query": "INSERT INTO public.debezium_heartbeat (id, connector, ts) VALUES (1, 'products', now()) ON CONFLICT (id) DO UPDATE SET ts = EXCLUDED.ts",
+
+  "signal.enabled.channels": "source",
+  "signal.data.collection": "public.debezium_signal",
+  "incremental.snapshot.chunk.size": "2048",
+
+  "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+  "key.converter.schemas.enable": "false",
+  "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+  "value.converter.schemas.enable": "false",
+
+  "transforms": "unwrap",
+  "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
+  "transforms.unwrap.delete.tombstone.handling.mode": "rewrite-with-tombstone",
+  "transforms.unwrap.add.fields": "op,lsn,source.ts_ms,ts_ms",
+
+  "topic.creation.default.replication.factor": "1",
+  "topic.creation.default.partitions": "1",
+  "topic.creation.default.cleanup.policy": "delete",
+  "topic.creation.default.retention.ms": "3600000",
+
+  "errors.tolerance": "none",
+  "errors.log.enable": "true",
+  "errors.log.include.messages": "true"
+}

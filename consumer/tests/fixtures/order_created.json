@@ -1,0 +1,33 @@
+{
+  "topic": "cdc.outbox.order",
+  "partition": 1,
+  "offset": 5,
+  "key": "1001",
+  "value": {
+    "id": 1001,
+    "customer_name": "Nguyễn Văn An",
+    "customer_email": "an@example.com",
+    "status": "paid",
+    "total_amount": "17980000.00",
+    "currency": "VND",
+    "created_at": "2026-10-20T08:00:00.000000+00:00",
+    "updated_at": "2026-10-20T08:00:00.000000+00:00",
+    "deleted": false,
+    "version": 77,
+    "occurred_at": "2026-10-20T08:00:00.120000+00:00",
+    "items": [
+      {
+        "product_id": 42,
+        "product_name": "Điện thoại Samsung Galaxy A55",
+        "unit_price": "8990000.00",
+        "quantity": 2
+      }
+    ]
+  },
+  "headers": {
+    "eventType": "OrderCreated",
+    "aggregateVersion": "77",
+    "id": "4b1f0c1e-3a4f-4a51-9a9e-0c3f1b6d7e11"
+  },
+  "timestamp_ms": 1792483200200
+}

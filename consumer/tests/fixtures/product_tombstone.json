@@ -1,0 +1,11 @@
+{
+  "topic": "cdc.public.products",
+  "partition": 3,
+  "offset": 14,
+  "key": {
+    "id": 42
+  },
+  "value": null,
+  "headers": {},
+  "timestamp_ms": 1792483000114
+}

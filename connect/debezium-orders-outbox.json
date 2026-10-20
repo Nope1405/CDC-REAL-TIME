@@ -1,0 +1,58 @@
+{
+  "name": "debezium-orders-outbox",
+  "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+  "tasks.max": "1",
+
+  "database.hostname": "postgres",
+  "database.port": "5432",
+  "database.user": "${env:DEBEZIUM_DB_USER}",
+  "database.password": "${env:DEBEZIUM_DB_PASSWORD}",
+  "database.dbname": "${env:POSTGRES_DB}",
+
+  "topic.prefix": "cdcorders",
+  "plugin.name": "pgoutput",
+  "slot.name": "cdc_orders_slot",
+  "publication.name": "cdc_orders_pub",
+  "publication.autocreate.mode": "disabled",
+  "table.include.list": "public.outbox_events,public.debezium_heartbeat",
+
+  "snapshot.mode": "no_data",
+  "max.batch.size": "4096",
+  "max.queue.size": "16384",
+  "poll.interval.ms": "100",
+
+  "decimal.handling.mode": "string",
+  "tombstones.on.delete": "false",
+
+  "heartbeat.interval.ms": "10000",
+  "heartbeat.action.query": "INSERT INTO public.debezium_heartbeat (id, connector, ts) VALUES (2, 'orders', now()) ON CONFLICT (id) DO UPDATE SET ts = EXCLUDED.ts",
+
+  "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+  "key.converter.schemas.enable": "false",
+  "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+  "value.converter.schemas.enable": "false",
+
+  "transforms": "outbox",
+  "transforms.outbox.type": "io.debezium.transforms.outbox.EventRouter",
+  "transforms.outbox.predicate": "isOutbox",
+  "transforms.outbox.table.field.event.id": "id",
+  "transforms.outbox.table.field.event.key": "aggregate_id",
+  "transforms.outbox.table.field.event.payload": "payload",
+  "transforms.outbox.route.by.field": "aggregate_type",
+  "transforms.outbox.route.topic.replacement": "cdc.outbox.${routedByValue}",
+  "transforms.outbox.table.fields.additional.placement": "type:header:eventType,aggregate_version:header:aggregateVersion",
+  "transforms.outbox.table.expand.json.payload": "true",
+
+  "predicates": "isOutbox",
+  "predicates.isOutbox.type": "org.apache.kafka.connect.transforms.predicates.TopicNameMatches",
+  "predicates.isOutbox.pattern": "cdcorders\\.public\\.outbox_events",
+
+  "topic.creation.default.replication.factor": "1",
+  "topic.creation.default.partitions": "1",
+  "topic.creation.default.cleanup.policy": "delete",
+  "topic.creation.default.retention.ms": "3600000",
+
+  "errors.tolerance": "none",
+  "errors.log.enable": "true",
+  "errors.log.include.messages": "true"
+}

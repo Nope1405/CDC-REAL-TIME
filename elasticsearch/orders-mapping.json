@@ -1,0 +1,34 @@
+{
+  "mappings": {
+    "_meta": { "source": "outbox aggregate 'order'", "schema_version": 1 },
+    "properties": {
+      "id": { "type": "long" },
+      "customer_name": {
+        "type": "text",
+        "analyzer": "vn_text",
+        "fields": { "raw": { "type": "keyword", "ignore_above": 256 } }
+      },
+      "customer_email": { "type": "keyword", "normalizer": "vn_keyword" },
+      "status":         { "type": "keyword" },
+      "total_amount":   { "type": "scaled_float", "scaling_factor": 100 },
+      "currency":       { "type": "keyword" },
+      "item_count":     { "type": "integer" },
+      "created_at":     { "type": "date" },
+      "updated_at":     { "type": "date" },
+      "occurred_at":    { "type": "date" },
+      "items": {
+        "type": "nested",
+        "properties": {
+          "product_id": { "type": "long" },
+          "product_name": {
+            "type": "text",
+            "analyzer": "vn_text",
+            "fields": { "raw": { "type": "keyword", "ignore_above": 256 } }
+          },
+          "unit_price": { "type": "scaled_float", "scaling_factor": 100 },
+          "quantity":   { "type": "integer" }
+        }
+      }
+    }
+  }
+}

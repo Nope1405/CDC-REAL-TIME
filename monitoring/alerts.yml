@@ -1,0 +1,89 @@
+groups:
+  - name: cdc-source
+    rules:
+      - alert: CdcReplicationSlotRetainingWal
+        expr: cdc_replication_slot_retained_bytes > 1e9
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Slot {{ $labels.slot_name }} retains {{ $value | humanize1024 }}B of WAL"
+          runbook: docs/runbook.md#slot-lag
+
+      - alert: CdcReplicationSlotNearInvalidation
+        expr: cdc_replication_slot_safe_wal_size_bytes >= 0 and cdc_replication_slot_safe_wal_size_bytes < 256e6
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "Slot {{ $labels.slot_name }} will be invalidated after {{ $value | humanize1024 }}B more WAL"
+          runbook: docs/runbook.md#slot-lag
+
+      - alert: CdcReplicationSlotLost
+        expr: cdc_replication_slot_lost == 1
+        labels: { severity: critical }
+        annotations:
+          summary: "Slot {{ $labels.slot_name }} is lost; connector must re-snapshot"
+          runbook: docs/runbook.md#slot-lost
+
+      - alert: CdcReplicationSlotInactive
+        expr: cdc_replication_slot_active == 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "No connector attached to slot {{ $labels.slot_name }}"
+          runbook: docs/runbook.md#connector-failed
+
+  - name: cdc-connect
+    rules:
+      - alert: DebeziumBehindSource
+        expr: debezium_metrics_MilliSecondsBehindSource{context="streaming"} > 30000
+        for: 2m
+        labels: { severity: warning }
+        annotations:
+          summary: "Debezium {{ $labels.name }} is {{ $value | humanizeDuration }}ms behind PostgreSQL"
+
+      - alert: ConnectTaskFailed
+        expr: kafka_connect_connector_task_status{status="failed"} == 1
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "Connector {{ $labels.connector }} task {{ $labels.task }} FAILED"
+          runbook: docs/runbook.md#connector-failed
+
+  - name: cdc-consumer
+    rules:
+      - alert: CdcConsumerDown
+        expr: absent(up{job="consumer"} == 1)
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "No CDC consumer replica is up"
+
+      - alert: CdcConsumerLagHigh
+        expr: sum by (consumergroup, topic) (kafka_consumergroup_lag{consumergroup="cdc-es-sink"}) > 10000
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Group {{ $labels.consumergroup }} is {{ $value }} records behind on {{ $labels.topic }}"
+
+      - alert: CdcEndToEndLagHigh
+        expr: |
+          histogram_quantile(0.95, sum by (le, entity) (rate(cdc_lag_seconds_bucket{stage="e2e"}[5m]))) > 2
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "p95 commit->indexed lag for {{ $labels.entity }} is {{ $value | humanize }}s (target < 2s)"
+
+      - alert: CdcConsumerPaused
+        expr: max(cdc_partitions_paused) == 1
+        for: 2m
+        labels: { severity: warning }
+        annotations:
+          summary: "Consumer paused: Elasticsearch has been failing for 2 minutes"
+          runbook: docs/runbook.md#es-down
+
+      - alert: CdcDlqReceivingRecords
+        expr: sum by (entity, reason) (increase(cdc_dlq_total[10m])) > 0
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $value }} {{ $labels.entity }} records dead-lettered ({{ $labels.reason }})"
+          runbook: docs/runbook.md#dlq-replay

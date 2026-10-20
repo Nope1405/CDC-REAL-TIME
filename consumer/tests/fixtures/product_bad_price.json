@@ -1,0 +1,32 @@
+{
+  "topic": "cdc.public.products",
+  "partition": 3,
+  "offset": 16,
+  "key": {
+    "id": 42
+  },
+  "value": {
+    "id": 42,
+    "sku": "SKU-000042",
+    "name": "Điện thoại Samsung Galaxy A55",
+    "description": "Màn hình 6.6 inch, pin 5000mAh",
+    "category": "Điện thoại",
+    "brand": "Samsung",
+    "price": "AAAAAA==",
+    "stock": 17,
+    "tags": [
+      "điện thoại",
+      "android"
+    ],
+    "is_active": true,
+    "created_at": "2026-10-01T03:00:00.123456Z",
+    "updated_at": "2026-10-20T08:15:30.654321Z",
+    "__op": "u",
+    "__lsn": 23461000,
+    "__source_ts_ms": 1792483000016,
+    "__ts_ms": 1792483000066,
+    "__deleted": "false"
+  },
+  "headers": {},
+  "timestamp_ms": 1792483000116
+}

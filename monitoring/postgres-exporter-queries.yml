@@ -1,0 +1,34 @@
+# Custom queries for postgres_exporter (PG_EXPORTER_EXTEND_QUERY_PATH).
+# Metric names: cdc_replication_slot_<column>{slot_name=...}
+cdc_replication_slot:
+  query: |
+    SELECT slot_name,
+           CASE WHEN active THEN 1 ELSE 0 END AS active,
+           COALESCE(pg_wal_lsn_diff(pg_current_wal_lsn(), confirmed_flush_lsn), 0) AS retained_bytes,
+           COALESCE(safe_wal_size, -1) AS safe_wal_size_bytes,
+           CASE WHEN wal_status = 'lost' THEN 1 ELSE 0 END AS lost
+    FROM pg_replication_slots
+  metrics:
+    - slot_name:
+        usage: LABEL
+        description: Replication slot name
+    - active:
+        usage: GAUGE
+        description: 1 if a walsender (Debezium) is connected to the slot
+    - retained_bytes:
+        usage: GAUGE
+        description: WAL bytes retained for this slot (current LSN - confirmed_flush_lsn)
+    - safe_wal_size_bytes:
+        usage: GAUGE
+        description: Bytes that can still be written before the slot is invalidated (-1 = unlimited)
+    - lost:
+        usage: GAUGE
+        description: 1 if the slot was invalidated by max_slot_wal_keep_size
+
+cdc_wal:
+  query: |
+    SELECT pg_wal_lsn_diff(pg_current_wal_lsn(), '0/0') AS lsn_bytes
+  metrics:
+    - lsn_bytes:
+        usage: COUNTER
+        description: Current WAL position in bytes (rate() = WAL write throughput)

@@ -1,0 +1,48 @@
+# Prometheus JMX exporter rules for Kafka Connect + Debezium.
+# Loaded by the javaagent configured through CONNECT_KAFKA_OPTS (see README.md).
+startDelaySeconds: 0
+lowercaseOutputName: false
+lowercaseOutputLabelNames: false
+rules:
+  # Debezium streaming/snapshot metrics, e.g.
+  # debezium_metrics_MilliSecondsBehindSource{context="streaming",name="cdc"}
+  - pattern: "debezium.([^:]+)<type=connector-metrics, context=([^,]+), server=([^,]+), task=([^>]+)><>([^:]+)"
+    name: "debezium_metrics_$5"
+    labels:
+      plugin: "$1"
+      context: "$2"
+      name: "$3"
+      task: "$4"
+  - pattern: "debezium.([^:]+)<type=connector-metrics, context=([^,]+), server=([^>]+)><>([^:]+)"
+    name: "debezium_metrics_$4"
+    labels:
+      plugin: "$1"
+      context: "$2"
+      name: "$3"
+
+  # Connector/task state as a 1-valued gauge labelled with the state string.
+  - pattern: "kafka.connect<type=connector-task-metrics, connector=([^,]+), task=([^>]+)><>status: ([a-z-]+)"
+    name: kafka_connect_connector_task_status
+    value: 1
+    labels:
+      connector: "$1"
+      task: "$2"
+      status: "$3"
+  - pattern: "kafka.connect<type=connector-metrics, connector=([^>]+)><>status: ([a-z-]+)"
+    name: kafka_connect_connector_status
+    value: 1
+    labels:
+      connector: "$1"
+      status: "$2"
+
+  - pattern: "kafka.connect<type=source-task-metrics, connector=([^,]+), task=([^>]+)><>([^:]+)"
+    name: "kafka_connect_source_task_$3"
+    labels:
+      connector: "$1"
+      task: "$2"
+  - pattern: "kafka.connect<type=connect-worker-metrics>([^:]+):"
+    name: "kafka_connect_worker_$1"
+  - pattern: "kafka.producer<type=producer-metrics, client-id=([^>]+)><>([^:]+)"
+    name: "kafka_connect_producer_$2"
+    labels:
+      client_id: "$1"

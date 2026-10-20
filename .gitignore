@@ -1,0 +1,10 @@
+.env
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+results/
+notebooks/.ipynb_checkpoints/
+data/
+*.log
+connect/jmx-exporter/*.jar

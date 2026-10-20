@@ -1,0 +1,65 @@
+{
+  "_meta": {
+    "description": "Shared settings for every CDC-derived index (products_v*, orders_v*). Installed as component template cdc-common by bootstrap.sh."
+  },
+  "template": {
+    "settings": {
+      "number_of_shards": 1,
+      "number_of_replicas": 0,
+      "refresh_interval": "1s",
+      "index.gc_deletes": "60s",
+      "analysis": {
+        "filter": {
+          "vn_folding": {
+            "type": "asciifolding",
+            "preserve_original": true
+          },
+          "vn_edge_ngram": {
+            "type": "edge_ngram",
+            "min_gram": 1,
+            "max_gram": 20
+          }
+        },
+        "analyzer": {
+          "vn_text": {
+            "type": "custom",
+            "tokenizer": "standard",
+            "filter": ["lowercase", "vn_folding"]
+          },
+          "vn_autocomplete": {
+            "type": "custom",
+            "tokenizer": "standard",
+            "filter": ["lowercase", "vn_folding", "vn_edge_ngram"]
+          }
+        },
+        "normalizer": {
+          "vn_keyword": {
+            "type": "custom",
+            "filter": ["lowercase", "asciifolding"]
+          }
+        }
+      }
+    },
+    "mappings": {
+      "dynamic": false,
+      "properties": {
+        "is_deleted": { "type": "boolean" },
+        "cdc": {
+          "properties": {
+            "op":           { "type": "keyword" },
+            "version":      { "type": "long" },
+            "lsn":          { "type": "long" },
+            "source_ts":    { "type": "date", "format": "epoch_millis" },
+            "connector_ts": { "type": "date", "format": "epoch_millis" },
+            "kafka_ts":     { "type": "date", "format": "epoch_millis" },
+            "consumed_at":  { "type": "date", "format": "epoch_millis" },
+            "indexed_at":   { "type": "date", "format": "epoch_millis" },
+            "topic":        { "type": "keyword" },
+            "partition":    { "type": "integer" },
+            "offset":       { "type": "long" }
+          }
+        }
+      }
+    }
+  }
+}

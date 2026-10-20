@@ -1,0 +1,284 @@
+# CDC Search Sync: PostgreSQL -> Debezium -> Kafka -> Python consumer -> Elasticsearch
+#
+#   docker compose up -d                          core stack
+#   docker compose --profile monitoring up -d     + Prometheus/Grafana/exporters
+#   docker compose --profile bench up -d postgres-baseline   pgbench baseline DB
+#
+# Every image is pinned. Values come from .env (copy .env.example).
+
+name: cdc-search-sync
+
+x-healthcheck-defaults: &hc
+  interval: 10s
+  timeout: 5s
+  retries: 30
+  start_period: 20s
+
+services:
+  # ---------------------------------------------------------------- source DB
+  postgres:
+    image: postgres:16.4-bookworm
+    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      DEBEZIUM_DB_USER: ${DEBEZIUM_DB_USER}
+      DEBEZIUM_DB_PASSWORD: ${DEBEZIUM_DB_PASSWORD}
+    ports: ["${POSTGRES_PORT:-5432}:5432"]
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./postgres/init.sh:/docker-entrypoint-initdb.d/00-init.sh:ro
+      - ./postgres/init.sql:/sql/init.sql:ro
+      - ./postgres/outbox.sql:/sql/outbox.sql:ro
+      - ./benchmark/pgbench:/bench:ro
+    shm_size: 256mb
+    healthcheck:
+      <<: *hc
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+
+  # Same image/config, no replication slot: the "without CDC" pgbench baseline.
+  postgres-baseline:
+    profiles: ["bench"]
+    image: postgres:16.4-bookworm
+    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      DEBEZIUM_DB_USER: ${DEBEZIUM_DB_USER}
+      DEBEZIUM_DB_PASSWORD: ${DEBEZIUM_DB_PASSWORD}
+    ports: ["${POSTGRES_BASELINE_PORT:-5433}:5432"]
+    volumes:
+      - pg-baseline-data:/var/lib/postgresql/data
+      - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./postgres/init.sh:/docker-entrypoint-initdb.d/00-init.sh:ro
+      - ./postgres/init.sql:/sql/init.sql:ro
+      - ./postgres/outbox.sql:/sql/outbox.sql:ro
+      - ./benchmark/pgbench:/bench:ro
+    shm_size: 256mb
+    healthcheck:
+      <<: *hc
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+
+  # -------------------------------------------------------------------- Kafka
+  kafka:
+    image: apache/kafka:3.8.0
+    user: root   # dev only: lets the named volume be writable without chown
+    environment:
+      CLUSTER_ID: ${KAFKA_CLUSTER_ID}
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:29092,CONTROLLER://:9093,EXTERNAL://:9092
+      # Containers use kafka:29092; scripts on the host use localhost:9092.
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,EXTERNAL://localhost:${KAFKA_EXTERNAL_PORT:-9092}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      # Single broker: every internal topic must use RF=1 or it never becomes available.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_CLEANER_BACKOFF_MS: 15000
+      KAFKA_HEAP_OPTS: -Xms512m -Xmx1g
+    ports: ["${KAFKA_EXTERNAL_PORT:-9092}:9092"]
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      <<: *hc
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:29092 >/dev/null 2>&1"]
+
+  kafka-init:
+    image: apache/kafka:3.8.0
+    depends_on:
+      kafka: { condition: service_healthy }
+    entrypoint: ["sh", "/scripts/create-topics.sh"]
+    environment:
+      KAFKA_BOOTSTRAP: kafka:29092
+      CDC_PARTITIONS: ${CDC_PARTITIONS:-6}
+    volumes:
+      - ./kafka/create-topics.sh:/scripts/create-topics.sh:ro
+    restart: "no"
+
+  kafka-connect:
+    image: quay.io/debezium/connect:3.0.0.Final
+    depends_on:
+      kafka-init: { condition: service_completed_successfully }
+      postgres: { condition: service_healthy }
+    environment:
+      BOOTSTRAP_SERVERS: kafka:29092
+      GROUP_ID: cdc-connect
+      CONFIG_STORAGE_TOPIC: _connect-configs
+      OFFSET_STORAGE_TOPIC: _connect-offsets
+      STATUS_STORAGE_TOPIC: _connect-status
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_TOPIC_CREATION_ENABLE: "true"
+      # Connector JSON references ${env:...}; secrets never live in the JSON.
+      CONNECT_CONFIG_PROVIDERS: env
+      CONNECT_CONFIG_PROVIDERS_ENV_CLASS: org.apache.kafka.common.config.provider.EnvVarConfigProvider
+      POSTGRES_DB: ${POSTGRES_DB}
+      DEBEZIUM_DB_USER: ${DEBEZIUM_DB_USER}
+      DEBEZIUM_DB_PASSWORD: ${DEBEZIUM_DB_PASSWORD}
+      HEAP_OPTS: -Xms512m -Xmx1g
+      # Empty unless the JMX exporter jar was downloaded (connect/jmx-exporter/README.md).
+      KAFKA_OPTS: ${CONNECT_KAFKA_OPTS:-}
+    ports:
+      - "${KAFKA_CONNECT_PORT:-8083}:8083"
+      - "${CONNECT_JMX_EXPORTER_PORT:-9404}:9404"
+    volumes:
+      - ./connect/jmx-exporter:/kafka/jmx-exporter:ro
+    healthcheck:
+      <<: *hc
+      start_period: 40s
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8083/connectors >/dev/null"]
+
+  connect-init:
+    image: curlimages/curl:8.10.1
+    depends_on:
+      kafka-connect: { condition: service_healthy }
+    entrypoint: ["sh", "/connect/register.sh"]
+    environment:
+      CONNECT_URL: http://kafka-connect:8083
+    volumes:
+      - ./connect:/connect:ro
+    restart: "no"
+
+  # ------------------------------------------------------------ Elasticsearch
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      xpack.ml.enabled: "false"
+      ES_JAVA_OPTS: -Xms1g -Xmx1g
+      cluster.routing.allocation.disk.threshold_enabled: "false"
+    ulimits:
+      nofile: { soft: 65536, hard: 65536 }
+    ports: ["${ELASTICSEARCH_PORT:-9200}:9200"]
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+    healthcheck:
+      <<: *hc
+      test: ["CMD-SHELL", "curl -fsS 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s' >/dev/null"]
+
+  es-init:
+    image: curlimages/curl:8.10.1
+    depends_on:
+      elasticsearch: { condition: service_healthy }
+    entrypoint: ["sh", "/es/bootstrap.sh"]
+    environment:
+      ES_URL: http://elasticsearch:9200
+    volumes:
+      - ./elasticsearch:/es:ro
+    restart: "no"
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.15.3
+    depends_on:
+      elasticsearch: { condition: service_healthy }
+    environment:
+      ELASTICSEARCH_HOSTS: '["http://elasticsearch:9200"]'
+    ports: ["${KIBANA_PORT:-5601}:5601"]
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:v0.7.2
+    depends_on:
+      kafka: { condition: service_healthy }
+    environment:
+      KAFKA_CLUSTERS_0_NAME: cdc
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME: connect
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS: http://kafka-connect:8083
+    ports: ["${KAFKA_UI_PORT:-8080}:8080"]
+
+  # ----------------------------------------------------------------- consumer
+  consumer:
+    build: ./consumer
+    image: cdc-search-sync/consumer:dev
+    depends_on:
+      kafka-init: { condition: service_completed_successfully }
+      es-init: { condition: service_completed_successfully }
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_GROUP_ID: ${CONSUMER_GROUP_ID:-cdc-es-sink}
+      ES_URL: http://elasticsearch:9200
+      BATCH_SIZE: ${CONSUMER_BATCH_SIZE:-500}
+      FLUSH_INTERVAL_MS: ${CONSUMER_FLUSH_INTERVAL_MS:-500}
+      DELETE_MODE: ${CONSUMER_DELETE_MODE:-soft}
+      LOG_LEVEL: ${CONSUMER_LOG_LEVEL:-INFO}
+    # A port range so `docker compose up --scale consumer=3` works.
+    ports: ["${CONSUMER_METRICS_PORTS:-8000-8005}:8000"]
+    stop_grace_period: 30s
+    restart: unless-stopped
+
+  # --------------------------------------------------------------- monitoring
+  prometheus:
+    profiles: ["monitoring"]
+    image: prom/prometheus:v2.54.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=7d
+      - --web.enable-lifecycle
+    ports: ["${PROMETHEUS_PORT:-9090}:9090"]
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+
+  grafana:
+    profiles: ["monitoring"]
+    image: grafana/grafana:11.2.2
+    depends_on: [prometheus]
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+    ports: ["${GRAFANA_PORT:-3000}:3000"]
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+
+  postgres-exporter:
+    profiles: ["monitoring"]
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.15.0
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      DATA_SOURCE_URI: postgres:5432/${POSTGRES_DB}?sslmode=disable
+      DATA_SOURCE_USER: ${POSTGRES_USER}
+      DATA_SOURCE_PASS: ${POSTGRES_PASSWORD}
+      PG_EXPORTER_EXTEND_QUERY_PATH: /etc/postgres-exporter/queries.yml
+    volumes:
+      - ./monitoring/postgres-exporter-queries.yml:/etc/postgres-exporter/queries.yml:ro
+
+  kafka-exporter:
+    profiles: ["monitoring"]
+    image: danielqsj/kafka-exporter:v1.8.0
+    depends_on:
+      kafka: { condition: service_healthy }
+    command: ["--kafka.server=kafka:29092", "--topic.filter=^cdc\\..*", "--group.filter=.*"]
+    restart: unless-stopped
+
+  elasticsearch-exporter:
+    profiles: ["monitoring"]
+    image: quay.io/prometheuscommunity/elasticsearch-exporter:v1.8.0
+    depends_on:
+      elasticsearch: { condition: service_healthy }
+    command: ["--es.uri=http://elasticsearch:9200", "--es.indices"]
+
+volumes:
+  pg-data:
+  pg-baseline-data:
+  kafka-data:
+  es-data:
+  prometheus-data:
+  grafana-data:

@@ -1,0 +1,36 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+scrape_configs:
+  # Every replica of the consumer service (docker DNS returns one A record per container).
+  - job_name: consumer
+    dns_sd_configs:
+      - names: [consumer]
+        type: A
+        port: 8000
+        refresh_interval: 15s
+
+  # Debezium / Kafka Connect via the JMX exporter javaagent (connect/jmx-exporter/README.md).
+  - job_name: kafka-connect
+    static_configs:
+      - targets: ["kafka-connect:9404"]
+
+  - job_name: postgres
+    static_configs:
+      - targets: ["postgres-exporter:9187"]
+
+  - job_name: kafka
+    static_configs:
+      - targets: ["kafka-exporter:9308"]
+
+  - job_name: elasticsearch
+    static_configs:
+      - targets: ["elasticsearch-exporter:9114"]
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
