@@ -17,19 +17,31 @@ curl -fsS -X PUT "$CONNECT/connectors/debezium-products/pause"
 sleep 5
 
 step "generate WAL in 24MB bursts until the paused slot is invalidated"
-# Filler table is not in any publication: it only produces WAL. Bursts are
-# spaced out so the running orders connector keeps confirming its LSN
-# (heartbeat every 10 s + offset flush every 5 s) between bursts and stays
-# well under the cap, while the paused products slot only accumulates.
+# Filler table is not in any publication: it only produces WAL. The cap applies
+# to every slot, so before each burst we wait until the running orders slot has
+# caught up (restart_lsn within 32MB). Invalidation is decided on restart_lsn,
+# which advances only when the connector confirms (heartbeat 10 s + offset
+# flush 5 s) and a running-xacts record is decoded; CHECKPOINT logs one.
+# The paused products slot never advances, so only it crosses the cap.
+orders_lag_mb() {
+  psql_c -tAc "SELECT COALESCE(pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn) / 1048576, 0)::int
+               FROM pg_replication_slots WHERE slot_name = 'cdc_orders_slot'"
+}
 psql_c -c "CREATE TABLE IF NOT EXISTS chaos_wal_filler (id bigint, pad text)" >/dev/null
 state=""
 for i in $(seq 1 25); do
+  for _ in $(seq 1 40); do
+    lag="$(orders_lag_mb)"
+    [ "$lag" -lt 32 ] && break
+    psql_c -c "CHECKPOINT" >/dev/null
+    sleep 3
+  done
+  [ "$lag" -lt 32 ] || fail "orders slot did not catch up (restart_lsn ${lag}MB behind)"
   psql_c -c "INSERT INTO chaos_wal_filler SELECT g, repeat(md5(g::text), 6) FROM generate_series(1, 100000) g" >/dev/null
   psql_c -c "TRUNCATE chaos_wal_filler" -c "CHECKPOINT" >/dev/null
   state="$(psql_c -tAc "SELECT wal_status FROM pg_replication_slots WHERE slot_name = 'cdc_products_slot'")"
-  echo "  burst $i: cdc_products_slot wal_status=$state"
+  echo "  burst $i: orders lag before burst ${lag}MB, cdc_products_slot wal_status=$state"
   [ "$state" = "lost" ] && break
-  sleep 15
 done
 psql_c -c "DROP TABLE chaos_wal_filler" >/dev/null
 slot_status
