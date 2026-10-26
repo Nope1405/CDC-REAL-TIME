@@ -20,7 +20,8 @@ curl -fsS "$ES/products/_count?q=warranty_months:24"; echo
 step "extend mapping in place (adding a field is allowed), then update_by_query to index it"
 curl -fsS -X PUT "$ES/products/_mapping" -H 'Content-Type: application/json' \
   -d '{"properties":{"warranty_months":{"type":"integer"}}}'; echo
-curl -fsS -X POST "$ES/products/_update_by_query?q=id:[1 TO 50]&refresh=true" >/dev/null
+curl -fsS -X POST "$ES/products/_update_by_query?refresh=true&conflicts=proceed" \
+  -H 'Content-Type: application/json' -d '{"query":{"range":{"id":{"gte":1,"lte":50}}}}' >/dev/null
 curl -fsS "$ES/products/_count?q=warranty_months:24"; echo
 
 step "DROP COLUMN: later events simply stop carrying it"

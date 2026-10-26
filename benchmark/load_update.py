@@ -21,7 +21,7 @@ import psycopg
 from common import pg_dsn, write_result
 
 PRODUCT_UPDATE = (
-    "UPDATE products SET price = price + 1000, stock = (stock + 1) % 1000 WHERE id = %s"
+    "UPDATE products SET price = price + 1000, stock = (stock + 1) %% 1000 WHERE id = %s"
 )
 ORDER_STATUSES = ["pending", "paid", "shipped", "delivered"]
 

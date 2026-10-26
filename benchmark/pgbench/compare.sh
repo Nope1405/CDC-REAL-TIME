@@ -11,6 +11,9 @@
 #
 # Usage: benchmark/pgbench/compare.sh [duration_s=60] [clients=8]
 set -euo pipefail
+# Git Bash on Windows rewrites "/opt/kafka/..." into "C:/Program Files/Git/opt/..."
+# before passing it to `docker exec`; disable that path conversion.
+export MSYS_NO_PATHCONV=1
 
 cd "$(dirname "$0")/../.."
 set -a; . ./.env; set +a

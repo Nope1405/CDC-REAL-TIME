@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # Shared helpers for chaos scenarios. Source it: . "$(dirname "$0")/lib.sh"
 set -euo pipefail
+# Git Bash on Windows rewrites "/opt/kafka/..." into "C:/Program Files/Git/opt/..."
+# before passing it to `docker exec`; disable that path conversion.
+export MSYS_NO_PATHCONV=1
+# Any failing command (including `wait` on a crashed background load) is a FAIL.
+trap 'rc=$?; printf "\033[1;31mFAIL\033[0m %s: line %s exited with %s\n" "$(basename "$0")" "$LINENO" "$rc"' ERR
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
