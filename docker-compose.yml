@@ -121,6 +121,9 @@ services:
       CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
       CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
       CONNECT_TOPIC_CREATION_ENABLE: "true"
+      # Debezium confirms the slot LSN to PostgreSQL when Connect flushes offsets.
+      # Default 60 s keeps WAL retained for a minute; 5 s releases it promptly.
+      CONNECT_OFFSET_FLUSH_INTERVAL_MS: 5000
       # Connector JSON references ${env:...}; secrets never live in the JSON.
       CONNECT_CONFIG_PROVIDERS: env
       CONNECT_CONFIG_PROVIDERS_ENV_CLASS: org.apache.kafka.common.config.provider.EnvVarConfigProvider

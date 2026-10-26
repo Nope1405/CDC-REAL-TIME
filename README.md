@@ -1,5 +1,7 @@
 # CDC Search Sync
 
+[![CI/CD](https://github.com/Nope1405/CDC-REAL-TIME/actions/workflows/ci.yml/badge.svg)](https://github.com/Nope1405/CDC-REAL-TIME/actions/workflows/ci.yml)
+
 Real-time sync from PostgreSQL to Elasticsearch: **PostgreSQL → Debezium → Kafka → Python consumer → Elasticsearch**,
 with measured lag, at-least-once delivery with idempotent writes, and fault-injection tests.
 
